@@ -29,10 +29,10 @@ const h = vi.hoisted(() => {
     auditLog: model(),
     idempotencyKey: model(),
     $queryRaw: vi.fn(async () => [{ "?column?": 1 }]),
+    $queryRawUnsafe: vi.fn(async () => [{ "?column?": 1 }]),
     $transaction: vi.fn(async (arg: any) =>
       typeof arg === "function" ? arg(prisma) : Promise.all(arg)
     ),
-    $queryRaw: vi.fn(),
     $disconnect: vi.fn(),
   };
   const mockFetchBaseFee = vi.fn();
@@ -65,6 +65,7 @@ vi.mock("@stellar/stellar-sdk", async (importActual) => {
     Horizon: {
       Server: vi.fn().mockImplementation(() => ({
         fetchBaseFee: h.mockFetchBaseFee,
+        feeStats: h.mockFetchBaseFee,
       })),
     },
   };
@@ -104,11 +105,14 @@ function authHeader(user = fakeUser()) {
 
 describe("auth routes", () => {
   it("GET /health is open", async () => {
-    h.prisma.$queryRaw.mockResolvedValueOnce([{ 1: 1 }]);
+    // The health service uses $queryRawUnsafe and getFeeStats (Horizon).
+    h.prisma.$queryRawUnsafe.mockResolvedValueOnce([{ "?column?": 1 }]);
     h.mockFetchBaseFee.mockResolvedValueOnce(100);
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
     expect(res.json().status).toBe("ok");
+    expect(res.json().database.connected).toBe(true);
+    expect(res.json().stellar.reachable).toBe(true);
   });
 
   it("POST /auth/challenge returns a transaction + passphrase", async () => {

@@ -27,7 +27,7 @@ import userGroupsRoutes from "./routes/user-groups";
 import { getCorrelationId } from "./lib/correlation";
 import { rateLimitPolicies } from "./lib/rate-limit";
 import { PrismaRateLimitStore } from "./services/rate-limit-store";
-import { getReadiness } from "./services/health";
+import healthRoutes from "./routes/health";
 
 /**
  * Global-policy key. Unlike the per-route policies (which run on `preHandler`
@@ -231,20 +231,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     });
   });
 
-  const liveness = async () => ({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-  });
-  app.get("/health", liveness);
-  app.get("/health/live", liveness);
-
-  const { getReadiness } = await import("./services/health.js");
-  app.get("/health/ready", async (request, reply) => {
-    const readiness = await getReadiness();
-    const statusCode = readiness.status === "ok" ? 200 : 503;
-    return reply.code(statusCode).send(readiness);
-  });
-
+  await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(groupRoutes);
   await app.register(expenseRoutes);

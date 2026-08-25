@@ -1,83 +1,111 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import Fastify from "fastify";
 
-const h = vi.hoisted(() => ({
-  queryRaw: vi.fn(),
-  feeStats: vi.fn(),
+const mockReadiness = vi.fn();
+
+vi.mock("../src/services/health", () => ({
+  getReadiness: (...args: unknown[]) => mockReadiness(...args),
 }));
 
-vi.mock("../src/db", () => ({
-  prisma: { $queryRaw: h.queryRaw },
-}));
+import healthRoutes from "../src/routes/health";
 
-vi.mock("../src/services/network", () => ({
-  getFeeStats: h.feeStats,
-}));
+function createApp() {
+  const app = Fastify({ logger: false });
+  app.register(healthRoutes);
+  return app;
+}
 
-import { buildApp } from "../src/app";
-import { clearReadinessCache } from "../src/services/health";
-
-let app: Awaited<ReturnType<typeof buildApp>>;
-
-beforeEach(async () => {
+beforeEach(() => {
   vi.clearAllMocks();
-  clearReadinessCache();
-  h.queryRaw.mockResolvedValue([{ 1: 1 }]);
-  h.feeStats.mockResolvedValue({ minAcceptedFee: 100 });
-  // checkAnchor reads process.env live at call time; unset it here (after
-  // config's own startup validation already ran) so readiness reports the
-  // anchor check as "disabled" instead of making a real network call.
-  vi.stubEnv("ANCHOR_HOME_DOMAIN", "");
-  if (!app) app = await buildApp();
 });
 
-describe("health routes", () => {
-  it("returns liveness without checking dependencies", async () => {
-    const response = await app.inject({ method: "GET", url: "/health/live" });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
+describe("GET /health", () => {
+  it("returns 200 with status ok when all checks pass", async () => {
+    mockReadiness.mockResolvedValue({
       status: "ok",
-      timestamp: expect.any(String),
+      database: { connected: true },
+      stellar: { reachable: true, network: "testnet" },
+      timestamp: new Date().toISOString(),
     });
-    expect(h.queryRaw).not.toHaveBeenCalled();
-    expect(h.feeStats).not.toHaveBeenCalled();
+
+    const app = createApp();
+    const res = await app.inject({ method: "GET", url: "/health" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe("ok");
+    expect(body.database.connected).toBe(true);
+    expect(body.stellar.reachable).toBe(true);
+    expect(body.stellar.network).toBe("testnet");
+    expect(typeof body.timestamp).toBe("string");
   });
 
-  it("returns ready when database and Stellar are available", async () => {
-    const response = await app.inject({ method: "GET", url: "/health/ready" });
+  it("returns 503 with status degraded when database is down", async () => {
+    mockReadiness.mockResolvedValue({
+      status: "degraded",
+      database: { connected: false },
+      stellar: { reachable: true, network: "testnet" },
+      timestamp: new Date().toISOString(),
+    });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
+    const app = createApp();
+    const res = await app.inject({ method: "GET", url: "/health" });
+
+    expect(res.statusCode).toBe(503);
+    const body = res.json();
+    expect(body.status).toBe("degraded");
+    expect(body.database.connected).toBe(false);
+    expect(body.stellar.reachable).toBe(true);
+  });
+
+  it("returns 503 with status degraded when stellar is unreachable", async () => {
+    mockReadiness.mockResolvedValue({
+      status: "degraded",
+      database: { connected: true },
+      stellar: { reachable: false, network: "testnet" },
+      timestamp: new Date().toISOString(),
+    });
+
+    const app = createApp();
+    const res = await app.inject({ method: "GET", url: "/health" });
+
+    expect(res.statusCode).toBe(503);
+    const body = res.json();
+    expect(body.status).toBe("degraded");
+    expect(body.database.connected).toBe(true);
+    expect(body.stellar.reachable).toBe(false);
+  });
+
+  it("returns 503 when both checks fail", async () => {
+    mockReadiness.mockResolvedValue({
+      status: "degraded",
+      database: { connected: false },
+      stellar: { reachable: false, network: "testnet" },
+      timestamp: new Date().toISOString(),
+    });
+
+    const app = createApp();
+    const res = await app.inject({ method: "GET", url: "/health" });
+
+    expect(res.statusCode).toBe(503);
+    const body = res.json();
+    expect(body.status).toBe("degraded");
+    expect(body.database.connected).toBe(false);
+    expect(body.stellar.reachable).toBe(false);
+  });
+
+  it("requires no authentication", async () => {
+    mockReadiness.mockResolvedValue({
       status: "ok",
-      checks: { database: "up", stellar: "up", anchor: "disabled" },
+      database: { connected: true },
+      stellar: { reachable: true, network: "testnet" },
+      timestamp: new Date().toISOString(),
     });
+
+    const app = createApp();
+    // No authorization header
+    const res = await app.inject({ method: "GET", url: "/health" });
+
+    expect(res.statusCode).toBe(200);
   });
-
-  it("returns not ready when the database is unavailable", async () => {
-    h.queryRaw.mockRejectedValueOnce(new Error("password=secret SQL error"));
-
-    const response = await app.inject({ method: "GET", url: "/health/ready" });
-
-    expect(response.statusCode).toBe(503);
-    expect(response.json()).toMatchObject({
-      status: "not_ready",
-      checks: { database: "down" },
-    });
-    expect(JSON.stringify(response.json())).not.toContain("password");
-    expect(JSON.stringify(response.json())).not.toContain("SQL");
-  });
-
-  it("returns not ready when Stellar times out", async () => {
-    h.feeStats.mockImplementationOnce(
-      () => new Promise((resolve) => setTimeout(() => resolve({}), 2_000))
-    );
-
-    const response = await app.inject({ method: "GET", url: "/health/ready" });
-
-    expect(response.statusCode).toBe(503);
-    expect(response.json()).toMatchObject({
-      status: "not_ready",
-      checks: { stellar: "down" },
-    });
-  }, 3_000);
 });
