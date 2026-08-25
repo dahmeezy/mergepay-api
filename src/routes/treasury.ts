@@ -195,10 +195,10 @@ export default async function treasuryRoutes(app: FastifyInstance) {
       key: idempotencyKey,
       resourceId: id,
       payload: body,
-      operation: async () => {
+      operation: async (tx) => {
         const code = shortCode();
         const { expiresAt, validitySeconds } = intentExpiry(body.validitySeconds);
-        const ttx = await prisma.treasuryTransaction.create({
+        const ttx = await tx.treasuryTransaction.create({
           data: {
             shortCode: code,
             groupId: id,
@@ -213,6 +213,15 @@ export default async function treasuryRoutes(app: FastifyInstance) {
             expiresAt,
           },
           include: { user: true },
+        });
+
+        await auditTx(tx, {
+          userId: auth.id,
+          groupId: id,
+          action: "treasury.deposit.create",
+          entityType: "treasury_transaction",
+          entityId: ttx.id,
+          metadata: { amount: body.amount, assetCode: body.assetCode, direction: "deposit" },
         });
 
         const account = await stellar.loadAccount(auth.stellarPublicKey);
@@ -276,10 +285,10 @@ export default async function treasuryRoutes(app: FastifyInstance) {
       key: idempotencyKey,
       resourceId: id,
       payload: body,
-      operation: async () => {
+      operation: async (tx) => {
         const code = shortCode();
         const { expiresAt, validitySeconds } = intentExpiry(body.validitySeconds);
-        const ttx = await prisma.treasuryTransaction.create({
+        const ttx = await tx.treasuryTransaction.create({
           data: {
             shortCode: code,
             groupId: id,
@@ -294,6 +303,15 @@ export default async function treasuryRoutes(app: FastifyInstance) {
             expiresAt,
           },
           include: { user: true },
+        });
+
+        await auditTx(tx, {
+          userId: auth.id,
+          groupId: id,
+          action: "treasury.withdrawal.create",
+          entityType: "treasury_transaction",
+          entityId: ttx.id,
+          metadata: { amount: body.amount, assetCode: body.assetCode, direction: "withdrawal" },
         });
 
         const account = await stellar.loadAccount(treasuryKey);
@@ -411,6 +429,7 @@ export default async function treasuryRoutes(app: FastifyInstance) {
           });
           await auditTx(tx, {
             userId: auth.id,
+            groupId: fresh.groupId,
             action: "treasury.confirm.failed",
             entityType: "treasury_transaction",
             entityId: id,
@@ -431,6 +450,7 @@ export default async function treasuryRoutes(app: FastifyInstance) {
         });
         await auditTx(tx, {
           userId: auth.id,
+          groupId: fresh.groupId,
           action: "treasury.confirm",
           entityType: "treasury_transaction",
           entityId: id,
