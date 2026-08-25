@@ -231,15 +231,18 @@ export async function buildApp(): Promise<FastifyInstance> {
     });
   });
 
+  // Health endpoints are exempt from rate limiting — operational probes
+  // (e.g. Kubernetes liveness probes) must always be reachable.
+  const HEALTH_EXEMPT = { config: { rateLimit: false } } as const;
   const liveness = async () => ({
     status: "ok",
     timestamp: new Date().toISOString(),
   });
-  app.get("/health", liveness);
-  app.get("/health/live", liveness);
+  app.get("/health", HEALTH_EXEMPT, liveness);
+  app.get("/health/live", HEALTH_EXEMPT, liveness);
 
   const { getReadiness } = await import("./services/health.js");
-  app.get("/health/ready", async (request, reply) => {
+  app.get("/health/ready", HEALTH_EXEMPT, async (request, reply) => {
     const readiness = await getReadiness();
     const statusCode = readiness.status === "ok" ? 200 : 503;
     return reply.code(statusCode).send(readiness);
