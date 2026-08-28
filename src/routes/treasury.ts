@@ -9,6 +9,7 @@ import { requireMembership, requireAdmin } from "../services/access";
 import { stellar, memoText } from "../services/stellar";
 import { shortCode } from "../services/codes";
 import { audit, auditTx } from "../services/audit";
+import { AuditAction } from "../services/audit-actions";
 import { validateAsset, validateAmount } from "../services/assets";
 import { rateLimited } from "../lib/rate-limit";
 import {
@@ -83,7 +84,7 @@ export default async function treasuryRoutes(app: FastifyInstance) {
       await auditTx(tx, {
         userId: auth.id,
         groupId: id,
-        action: "treasury.enable",
+        action: AuditAction.TREASURY_ENABLE,
         entityType: "group",
         entityId: id,
         outcome: "success",
@@ -164,7 +165,7 @@ export default async function treasuryRoutes(app: FastifyInstance) {
     
     await audit({
       userId: auth.id,
-      action: "treasury.signer_validation",
+      action: AuditAction.TREASURY_SIGNER_VALIDATION,
       entityType: "group",
       entityId: id,
       metadata: {
@@ -212,12 +213,17 @@ export default async function treasuryRoutes(app: FastifyInstance) {
       key: idempotencyKey,
       resourceId: id,
       payload: body,
-      operation: async () => {
+      operation: async (tx) => {
         const code = shortCode();
         const { expiresAt, validitySeconds } = intentExpiry(body.validitySeconds);
+
+        const account = await stellar.loadAccount(auth.stellarPublicKey);
+        if (!account.exists) {
+          throw Errors.badRequest("account_unfunded", "Your account is not funded yet");
+        }
         const xdr = stellar.buildPayment({
           sourcePublicKey: auth.stellarPublicKey,
-          sourceSequence: (await stellar.loadAccount(auth.stellarPublicKey)).sequence,
+          sourceSequence: account.sequence,
           destination: treasuryKey,
           asset: { code: body.assetCode, issuer: body.assetIssuer ?? null },
           amount: body.amount,
@@ -231,7 +237,7 @@ export default async function treasuryRoutes(app: FastifyInstance) {
           .hash()
           .toString("hex");
 
-        const ttx = await prisma.treasuryTransaction.create({
+        const ttx = await tx.treasuryTransaction.create({
           data: {
             shortCode: code,
             groupId: id,
@@ -248,6 +254,21 @@ export default async function treasuryRoutes(app: FastifyInstance) {
           },
           include: { user: true },
         });
+
+        await auditTx(tx, {
+          userId: auth.id,
+          groupId: id,
+          action: AuditAction.TREASURY_DEPOSIT_CREATE,
+          entityType: "treasury_transaction",
+          entityId: ttx.id,
+          metadata: {
+            amount: body.amount,
+            assetCode: body.assetCode,
+            assetIssuer: body.assetIssuer ?? null,
+            destination: treasuryKey,
+          },
+        });
+
 
         return {
           treasuryTransaction: serializeTreasuryTx(ttx),
@@ -298,9 +319,10 @@ export default async function treasuryRoutes(app: FastifyInstance) {
       key: idempotencyKey,
       resourceId: id,
       payload: body,
-      operation: async () => {
+      operation: async (tx) => {
         const code = shortCode();
         const { expiresAt, validitySeconds } = intentExpiry(body.validitySeconds);
+
         const account = await stellar.loadAccount(treasuryKey);
         if (!account.exists) {
           throw Errors.badRequest("treasury_unfunded", "Treasury account is not funded");
@@ -321,7 +343,7 @@ export default async function treasuryRoutes(app: FastifyInstance) {
           .hash()
           .toString("hex");
 
-        const ttx = await prisma.treasuryTransaction.create({
+        const ttx = await tx.treasuryTransaction.create({
           data: {
             shortCode: code,
             groupId: id,
@@ -338,6 +360,21 @@ export default async function treasuryRoutes(app: FastifyInstance) {
           },
           include: { user: true },
         });
+
+        await auditTx(tx, {
+          userId: auth.id,
+          groupId: id,
+          action: AuditAction.TREASURY_WITHDRAW_CREATE,
+          entityType: "treasury_transaction",
+          entityId: ttx.id,
+          metadata: {
+            amount: body.amount,
+            assetCode: body.assetCode,
+            assetIssuer: body.assetIssuer ?? null,
+            destination: body.destination,
+          },
+        });
+
 
         return {
           treasuryTransaction: serializeTreasuryTx(ttx),
@@ -464,7 +501,7 @@ export default async function treasuryRoutes(app: FastifyInstance) {
           });
           await auditTx(tx, {
             userId: auth.id,
-            action: "treasury.confirm.failed",
+            action: AuditAction.TREASURY_CONFIRM_FAILED,
             entityType: "treasury_transaction",
             entityId: id,
             outcome: "failure",
@@ -484,7 +521,7 @@ export default async function treasuryRoutes(app: FastifyInstance) {
         });
         await auditTx(tx, {
           userId: auth.id,
-          action: "treasury.confirm",
+          action: AuditAction.TREASURY_CONFIRM,
           entityType: "treasury_transaction",
           entityId: id,
           metadata: { hash, direction: fresh.direction },
