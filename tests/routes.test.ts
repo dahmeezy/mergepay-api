@@ -57,7 +57,6 @@ const h = vi.hoisted(() => {
     auditLog: model(),
     idempotencyKey: model(),
     refreshToken: model(),
-    $queryRaw: vi.fn(async () => [{ "?column?": 1 }]),
     $queryRawUnsafe: vi.fn(async () => [{ "?column?": 1 }]),
     $transaction: vi.fn(async (arg: any) =>
       typeof arg === "function" ? arg(prisma) : Promise.all(arg)

@@ -2,8 +2,8 @@ import { prisma } from "../db";
 import { config } from "../config";
 import { getFeeStats } from "./network";
 
-const CHECK_TIMEOUT_MS = 1_500;
-const DEEP_CHECK_TIMEOUT_MS = 4_000;
+const CHECK_TIMEOUT_MS = 5_000;
+const DEEP_CHECK_TIMEOUT_MS = 5_000;
 const READINESS_CACHE_TTL_MS = 5_000;
 
 export interface ReadinessResponse {
@@ -57,7 +57,7 @@ function withTimeout<T>(operation: Promise<T>): Promise<T> {
 
 export async function checkDatabase(): Promise<boolean> {
   try {
-    await withTimeout(prisma.$queryRawUnsafe('SELECT 1') as Promise<unknown>);
+    await withTimeout(prisma.$queryRawUnsafe("SELECT 1") as Promise<unknown>);
     return true;
   } catch {
     return false;
