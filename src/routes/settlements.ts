@@ -217,6 +217,20 @@ export default async function settlementRoutes(app: FastifyInstance) {
           data: { status: "settling" },
         });
 
+        await auditTx(tx, {
+          userId: auth.id,
+          groupId: expense.groupId,
+          action: "settlement.create",
+          entityType: "settlement",
+          entityId: settlement.id,
+          metadata: {
+            from: auth.id,
+            to: expense.payerUserId,
+            amount: myShare.shareAmount,
+            assetCode,
+          },
+        });
+
         const xdr = await buildSettlementXdr({
           fromPublicKey: auth.stellarPublicKey,
           toPublicKey: expense.payer.stellarPublicKey,
@@ -295,6 +309,20 @@ export default async function settlementRoutes(app: FastifyInstance) {
           entityId: settlement.id,
           newStatus: "pending",
           source: "api",
+        });
+
+        await auditTx(tx, {
+          userId: auth.id,
+          groupId,
+          action: "settlement.create",
+          entityType: "settlement",
+          entityId: settlement.id,
+          metadata: {
+            from: auth.id,
+            to: body.toUserId,
+            amount: body.amount,
+            assetCode: body.assetCode,
+          },
         });
 
         const xdr = await buildSettlementXdr({
@@ -445,6 +473,7 @@ export default async function settlementRoutes(app: FastifyInstance) {
           // retry bookkeeping is reset below so the worker picks it up fresh.
           await auditTx(tx, {
             userId: auth.id,
+            groupId: settlement.groupId,
             action: "settlement.confirm.retry",
             entityType: "settlement",
             entityId: id,
@@ -477,6 +506,7 @@ export default async function settlementRoutes(app: FastifyInstance) {
           });
           await auditTx(tx, {
             userId: auth.id,
+            groupId: settlement.groupId,
             action: "settlement.confirm",
             entityType: "settlement",
             entityId: id,
