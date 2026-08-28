@@ -157,6 +157,9 @@ describe("AC6: audit logging consistency", () => {
         userId: userA.id,
         role: "admin",
       });
+      prisma.groupMember.findMany.mockResolvedValueOnce([
+        { userId: userA.id, user: { stellarPublicKey: userA.stellarPublicKey } },
+      ]);
       prisma.expense.create.mockResolvedValueOnce({
         id: "exp_1",
         groupId: "group_1",
@@ -402,6 +405,9 @@ describe("AC6: audit logging consistency", () => {
         userId: userA.id,
         role: "admin",
       });
+      prisma.groupMember.findMany.mockResolvedValueOnce([
+        { userId: userA.id, user: { stellarPublicKey: userA.stellarPublicKey } },
+      ]);
       prisma.expense.create.mockResolvedValueOnce({
         id: "exp_2",
         groupId: "group_1",
