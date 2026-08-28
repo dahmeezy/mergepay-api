@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import Fastify from "fastify";
 
 const h = vi.hoisted(() => ({
   queryRaw: vi.fn(),
@@ -8,23 +7,22 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("../src/db", () => ({
-  prisma: { $queryRaw: h.queryRaw, $queryRawUnsafe: h.queryRawUnsafe },
+  prisma: {
+    $queryRaw: h.queryRaw,
+    $queryRawUnsafe: h.queryRawUnsafe,
+  },
 }));
 
-vi.mock("../src/services/health", () => ({
-  getReadiness: (...args: unknown[]) => mockReadiness(...args),
+vi.mock("../src/services/network", () => ({
+  getFeeStats: (...args: unknown[]) => h.feeStats(...args),
 }));
 
 import { buildApp } from "../src/app";
 import { clearReadinessCache } from "../src/services/health";
 
-function createApp() {
-  const app = Fastify({ logger: false });
-  app.register(healthRoutes);
-  return app;
-}
+let app: Awaited<ReturnType<typeof buildApp>>;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   clearReadinessCache();
   h.queryRaw.mockResolvedValue([{ 1: 1 }]);
@@ -106,9 +104,7 @@ describe("GET /health/live", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       status: "ok",
-      database: { connected: true },
-      stellar: { reachable: true, network: "testnet" },
-      timestamp: new Date().toISOString(),
+      timestamp: expect.any(String),
     });
     expect(h.queryRawUnsafe).not.toHaveBeenCalled();
     expect(h.queryRaw).not.toHaveBeenCalled();
@@ -134,8 +130,7 @@ describe("GET /health/ready", () => {
   it("returns not ready when the database is unavailable", async () => {
     h.queryRawUnsafe.mockRejectedValueOnce(new Error("password=secret SQL error"));
 
-    const app = createApp();
-    const res = await app.inject({ method: "GET", url: "/health" });
+    const response = await app.inject({ method: "GET", url: "/health/ready" });
 
     expect(response.statusCode).toBe(503);
     const body = response.json();
@@ -151,8 +146,7 @@ describe("GET /health/ready", () => {
       () => new Promise((resolve) => setTimeout(() => resolve({}), 6_000))
     );
 
-    const app = createApp();
-    const res = await app.inject({ method: "GET", url: "/health" });
+    const response = await app.inject({ method: "GET", url: "/health/ready" });
 
     expect(response.statusCode).toBe(503);
     const body = response.json();
