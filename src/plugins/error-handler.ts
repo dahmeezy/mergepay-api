@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
 import { ZodError } from "zod";
 import { AppError } from "../lib/errors";
+import { formatErrorResponse } from "../utils/error-response";
 import { toRequestLimitError } from "../lib/request-limits";
 import { TimeoutError, TransportError, toProviderError } from "../services/timeout";
 
@@ -53,14 +54,9 @@ export default fp(async function errorHandlerPlugin(app: FastifyInstance) {
       const field = first?.path.join(".");
       const message = field ? `${field}: ${first.message}` : first?.message ?? "Validation failed";
 
-      return reply.code(400).send({
-        code: "VALIDATION_ERROR",
-        error: "VALIDATION_ERROR",
-        message,
-        requestId,
-        details,
-        issues,
-      });
+      return reply.code(400).send(
+        formatErrorResponse("VALIDATION_ERROR", message, requestId, { details, issues })
+      );
     }
 
     // A request that failed Fastify's own JSON-schema validation (from a
@@ -76,26 +72,15 @@ export default fp(async function errorHandlerPlugin(app: FastifyInstance) {
             message: v?.message ?? "Validation failed",
           }))
         : undefined;
-      return reply.code(400).send({
-        code: "VALIDATION_ERROR",
-        error: "VALIDATION_ERROR",
-        message: "Validation failed",
-        requestId,
-        details,
-      });
+      return reply.code(400).send(
+        formatErrorResponse("VALIDATION_ERROR", "Validation failed", requestId, { details })
+      );
     }
 
     if (err instanceof AppError) {
-      const body: Record<string, unknown> = {
-        code: err.code,
-        error: err.code,
-        message: err.message,
-        requestId,
-      };
-      if (err.details !== undefined) {
-        body.details = err.details;
-      }
-      return reply.code(err.status).send(body);
+      return reply.code(err.status).send(
+        formatErrorResponse(err.code, err.message, requestId, err.details)
+      );
     }
 
     // A timeout or transport failure that escaped a handler still means the
@@ -108,12 +93,9 @@ export default fp(async function errorHandlerPlugin(app: FastifyInstance) {
         operation: "route",
         fallbackMessage: "The upstream service is unavailable",
       });
-      return reply.code(converted.status).send({
-        code: converted.code,
-        error: converted.code,
-        message: converted.message,
-        requestId,
-      });
+      return reply.code(converted.status).send(
+        formatErrorResponse(converted.code, converted.message, requestId)
+      );
     }
 
     // Size and shape limits rejected by Fastify or @fastify/multipart before a
@@ -122,12 +104,9 @@ export default fp(async function errorHandlerPlugin(app: FastifyInstance) {
     // no stable code to branch on. See src/lib/request-limits.ts.
     const limitError = toRequestLimitError(err);
     if (limitError) {
-      return reply.code(limitError.status).send({
-        code: limitError.code,
-        error: limitError.code,
-        message: limitError.message,
-        requestId,
-      });
+      return reply.code(limitError.status).send(
+        formatErrorResponse(limitError.code, limitError.message, requestId)
+      );
     }
 
     const upstreamStatus =
@@ -137,68 +116,52 @@ export default fp(async function errorHandlerPlugin(app: FastifyInstance) {
 
     if (isHorizonError(err) && typeof upstreamStatus === "number") {
       const operation = (err as any).operation ?? "Horizon request";
+      // Log upstream incidents at WARN without including full upstream
+      // error objects to avoid leaking potentially sensitive payloads.
       req.log.warn(
         {
           requestId,
           operation,
           statusCode: upstreamStatus,
           errorCode: (err as any).code ?? "UPSTREAM_ERROR",
-          err,
+          message: (err as any).message,
         },
         "Horizon upstream failure"
       );
 
       if (upstreamStatus === 429) {
-        return reply.code(429).send({
-          code: "RATE_LIMITED",
-          error: "RATE_LIMITED",
-          message: "Horizon is rate limiting requests. Please retry shortly.",
-          requestId,
-        });
+        return reply.code(429).send(
+          formatErrorResponse("RATE_LIMITED", "Horizon is rate limiting requests. Please retry shortly.", requestId)
+        );
       }
 
       if (upstreamStatus >= 500 || upstreamStatus === 408) {
-        return reply.code(502).send({
-          code: "UPSTREAM_ERROR",
-          error: "UPSTREAM_ERROR",
-          message: `${operation} is temporarily unavailable. Please retry shortly.`,
-          requestId,
-        });
+        return reply.code(502).send(
+          formatErrorResponse("UPSTREAM_ERROR", `${operation} is temporarily unavailable. Please retry shortly.`, requestId)
+        );
       }
 
-      return reply.code(502).send({
-        code: "UPSTREAM_ERROR",
-        error: "UPSTREAM_ERROR",
-        message: `${operation} failed while contacting the Stellar network.`,
-        requestId,
-      });
+      return reply.code(502).send(
+        formatErrorResponse("UPSTREAM_ERROR", `${operation} failed while contacting the Stellar network.`, requestId)
+      );
     }
 
     if ((err as any).statusCode === 429) {
-      return reply.code(429).send({
-        code: "RATE_LIMITED",
-        error: "RATE_LIMITED",
-        message: "Too many requests, slow down.",
-        requestId,
-      });
+      return reply.code(429).send(
+        formatErrorResponse("RATE_LIMITED", "Too many requests, slow down.", requestId)
+      );
     }
 
     if ((err as any).statusCode && (err as any).statusCode < 500) {
       const status: number = (err as any).statusCode;
-      return reply.code(status).send({
-        code: "BAD_REQUEST",
-        error: "BAD_REQUEST",
-        message: err.message,
-        requestId,
-      });
+      return reply.code(status).send(
+        formatErrorResponse("BAD_REQUEST", err.message, requestId)
+      );
     }
 
     app.log.error({ err, requestId }, "Unhandled error");
-    return reply.code(500).send({
-      code: "INTERNAL_ERROR",
-      error: "INTERNAL_ERROR",
-      message: "Something went wrong.",
-      requestId,
-    });
+    return reply.code(500).send(
+      formatErrorResponse("INTERNAL_ERROR", "Something went wrong.", requestId)
+    );
   });
 });
