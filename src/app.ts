@@ -31,7 +31,6 @@ import exchangeRateRoutes from "./routes/exchange-rates";
 import userGroupsRoutes from "./routes/user-groups";
 import healthRoutes from "./routes/health";
 import { getCorrelationId } from "./lib/correlation";
-import { AppError } from "./lib/errors";
 import { formatErrorResponse } from "./utils/error-response";
 import { rateLimitPolicies } from "./lib/rate-limit";
 import { stellarErrorSerializer } from "./lib/stellar-serializer";

@@ -135,7 +135,7 @@ describe("error response shape consistency", () => {
     expect(Array.isArray(body.error.issues)).toBe(true);
     expect(body.error.issues.length).toBeGreaterThan(0);
     // Each issue has path, message, and code — no stack traces or internal fields
-    for (const issue of body.issues) {
+    for (const issue of body.error.issues) {
       expect(Array.isArray(issue.path)).toBe(true);
       expect(typeof issue.message).toBe("string");
       expect(typeof issue.code).toBe("string");

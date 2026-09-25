@@ -4,9 +4,16 @@ export interface ErrorPayload {
   timestamp: string;
   requestId?: string;
   details?: unknown;
+  issues?: unknown;
 }
 
-export function formatErrorResponse(code: string, message: string, requestId?: string, details?: unknown) {
+export function formatErrorResponse(
+  code: string,
+  message: string,
+  requestId?: string,
+  details?: unknown,
+  issues?: unknown
+) {
   const payload: ErrorPayload = {
     code,
     message,
@@ -14,6 +21,7 @@ export function formatErrorResponse(code: string, message: string, requestId?: s
   };
   if (requestId) payload.requestId = requestId;
   if (details !== undefined) payload.details = details;
+  if (issues !== undefined) payload.issues = issues;
 
   // Backwards-compatible top-level fields (`code`, `message`, `requestId`) are
   // included to avoid breaking existing clients/tests while introducing the

@@ -129,10 +129,10 @@ function expectValidation400(res: { statusCode: number; json: () => any }) {
   const body = res.json();
   expect(res.statusCode).toBe(400);
   expect(body.code).toBe("VALIDATION_ERROR");
-  expect(body.error).toBe("VALIDATION_ERROR");
+  expect(body.error.code).toBe("VALIDATION_ERROR");
   expect(typeof body.message).toBe("string");
-  expect(Array.isArray(body.details)).toBe(true);
-  expect(body.details.length).toBeGreaterThan(0);
+  expect(Array.isArray(body.error.details)).toBe(true);
+  expect(body.error.details.length).toBeGreaterThan(0);
 }
 
 describe("POST /anchors/deposit — request validation", () => {

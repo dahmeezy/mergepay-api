@@ -55,7 +55,7 @@ export default fp(async function errorHandlerPlugin(app: FastifyInstance) {
       const message = field ? `${field}: ${first.message}` : first?.message ?? "Validation failed";
 
       return reply.code(400).send(
-        formatErrorResponse("VALIDATION_ERROR", message, requestId, { details, issues })
+        formatErrorResponse("VALIDATION_ERROR", message, requestId, details, issues)
       );
     }
 
@@ -73,7 +73,7 @@ export default fp(async function errorHandlerPlugin(app: FastifyInstance) {
           }))
         : undefined;
       return reply.code(400).send(
-        formatErrorResponse("VALIDATION_ERROR", "Validation failed", requestId, { details })
+        formatErrorResponse("VALIDATION_ERROR", "Validation failed", requestId, details)
       );
     }
 
