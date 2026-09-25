@@ -246,6 +246,49 @@ describe("POST /groups/:groupId/treasury/proposals", () => {
     );
   });
 
+  it("classifies builder failures and persists a safe failure audit", async () => {
+    const user = fakeUser();
+    const treasury = Keypair.random();
+    const destination = Keypair.random().publicKey();
+    prisma.groupMember.findUnique.mockResolvedValueOnce({
+      groupId: "group_1",
+      userId: user.id,
+      role: "admin",
+    });
+    prisma.group.findUnique.mockResolvedValueOnce({
+      id: "group_1",
+      treasuryEnabled: true,
+      treasuryAccountPublicKey: treasury.publicKey(),
+      treasuryRequiredSigners: 2,
+    });
+    prisma.auditLog.create.mockResolvedValueOnce({});
+    const { stellar } = await import("../src/services/stellar");
+    vi.mocked(stellar.buildPayment).mockImplementationOnce(() => {
+      throw new Error("threshold cannot be satisfied");
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/groups/group_1/treasury/proposals",
+      headers: authHeader(user),
+      payload: { destination, amount: "5", assetCode: "XLM" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("MULTISIG_CONFIGURATION_INVALID");
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "treasury.proposal.failed",
+          metadata: expect.objectContaining({ outcome: "failure" }),
+        }),
+      })
+    );
+    expect(JSON.stringify(prisma.auditLog.create.mock.calls)).not.toContain(
+      "threshold cannot be satisfied"
+    );
+  });
+
   it("rejects a non-Stellar destination", async () => {
     const user = fakeUser();
     prisma.groupMember.findUnique.mockResolvedValueOnce({
