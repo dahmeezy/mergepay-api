@@ -49,7 +49,7 @@ import { config } from "../config";
 import { Errors } from "../errors";
 import { prisma } from "../db";
 import { stellar } from "./stellar";
-import { auditTx } from "./audit";
+import { audit, auditTx } from "./audit";
 import { AuditAction } from "./audit-actions";
 
 export interface CreateProposalParams {
@@ -66,6 +66,31 @@ export interface CreateProposalParams {
 export interface SignatureSubmission {
   publicKey: string;
   signature: string; // base64-encoded 64-byte ed25519 signature
+}
+
+function classifyProposalBuildError(error: unknown): Error {
+  if (error instanceof Error && error.name === "AppError") return error;
+
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("threshold") || message.includes("signer")) {
+    return Errors.badRequest(
+      "multisig_configuration_invalid",
+      "The treasury multisig configuration cannot authorize this proposal"
+    );
+  }
+  if (message.includes("sequence") || message.includes("bad_seq")) {
+    return Errors.badRequest(
+      "multisig_sequence_invalid",
+      "The treasury account sequence is not valid for this proposal"
+    );
+  }
+  if (message.includes("unique constraint") || message.includes("p2002")) {
+    return Errors.conflict(
+      "proposal_duplicate",
+      "A matching treasury proposal already exists"
+    );
+  }
+  return Errors.upstream("The treasury proposal could not be built");
 }
 
 interface StoredSignature {
@@ -111,36 +136,51 @@ export const treasuryProposalsService = {
       );
     }
 
-    const treasuryAcct = await stellar.loadAccount(
-      treasury.treasuryAccountPublicKey
-    );
-    if (!treasuryAcct.exists) {
-      throw Errors.badRequest(
-        "treasury_unfunded",
-        "Treasury account is not funded on the Stellar network"
+    let xdr: string;
+    let txHash: string;
+    try {
+      const treasuryAcct = await stellar.loadAccount(
+        treasury.treasuryAccountPublicKey
       );
+      if (!treasuryAcct.exists) {
+        throw Errors.badRequest(
+          "treasury_unfunded",
+          "Treasury account is not funded on the Stellar network"
+        );
+      }
+
+      const textMemo = params.memo ?? `MP:${shortCodeRunes()}`;
+      xdr = stellar.buildPayment({
+        sourcePublicKey: treasury.treasuryAccountPublicKey,
+        sourceSequence: treasuryAcct.sequence,
+        destination: params.destination,
+        asset: { code: params.assetCode, issuer: params.assetIssuer },
+        amount: params.amount,
+        memoCode: textMemo,
+      });
+
+      const baseTx = new Transaction(xdr, config.networkPassphrase);
+      txHash = baseTx.hash().toString("hex");
+    } catch (error) {
+      const classified = classifyProposalBuildError(error);
+      await audit({
+        userId: params.creatorId,
+        groupId: params.groupId,
+        action: AuditAction.TREASURY_PROPOSAL_FAILED,
+        entityType: "treasury_proposal_build",
+        entityId: `${params.groupId}:${params.creatorId}`,
+        outcome: "failure",
+        metadata: { errorCode: classified instanceof Error ? classified.name : "unknown" },
+      });
+      throw classified;
     }
-
-    const textMemo = params.memo ?? `MP:${shortCodeRunes()}`;
-    const xdr = stellar.buildPayment({
-      sourcePublicKey: treasury.treasuryAccountPublicKey,
-      sourceSequence: treasuryAcct.sequence,
-      destination: params.destination,
-      asset: { code: params.assetCode, issuer: params.assetIssuer },
-      amount: params.amount,
-      memoCode: textMemo,
-    });
-
-    // Compute the transaction hash so approvals can be bound to this exact
-    // intent. The hash is deterministic from the unsigned envelope bytes and
-    // the network passphrase.
-    const baseTx = new Transaction(xdr, config.networkPassphrase);
-    const txHash = baseTx.hash().toString("hex");
 
     const initialStatus =
       threshold > 1 ? STATUS.awaitingSignatures : STATUS.pending;
 
-    const proposal = await prisma.$transaction(async (tx) => {
+    let proposal;
+    try {
+      proposal = await prisma.$transaction(async (tx) => {
       const created = await tx.treasuryProposal.create({
         data: {
           groupId: params.groupId,
@@ -165,8 +205,21 @@ export const treasuryProposalsService = {
           threshold,
         },
       });
-      return created;
-    });
+        return created;
+      });
+    } catch (error) {
+      const classified = classifyProposalBuildError(error);
+      await audit({
+        userId: params.creatorId,
+        groupId: params.groupId,
+        action: AuditAction.TREASURY_PROPOSAL_FAILED,
+        entityType: "treasury_proposal_build",
+        entityId: `${params.groupId}:${params.creatorId}`,
+        outcome: "failure",
+        metadata: { errorCode: classified instanceof Error ? classified.name : "unknown" },
+      });
+      throw classified;
+    }
 
     return { proposal, xdr, networkPassphrase: config.networkPassphrase };
   },
