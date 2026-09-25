@@ -283,7 +283,7 @@ describe("POST /treasury-transactions/:id/confirm — multisig withdrawal", () =
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toBe("XDR_MISMATCH");
+    expect(res.json().error.code).toBe("XDR_MISMATCH");
   });
 
   it("rejects malformed XDR without updating status to confirmed", async () => {
@@ -343,7 +343,7 @@ describe("POST /treasury-transactions/:id/confirm — multisig withdrawal", () =
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toBe("TREASURY_UNFUNDED");
+    expect(res.json().error.code).toBe("TREASURY_UNFUNDED");
   });
 
   it("only an admin can confirm a withdrawal", async () => {

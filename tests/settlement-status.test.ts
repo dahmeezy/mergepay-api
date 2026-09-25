@@ -236,7 +236,7 @@ describe("GET /settlements/:id/status — access", () => {
 
     expect(res.statusCode).toBe(403);
     const body = res.json();
-    expect(body.error).toBe("FORBIDDEN");
+    expect(body.error.code).toBe("FORBIDDEN");
     // No amount, party, group, asset, or hash in the refusal. The requestId is
     // a random correlation id that legitimately appears on every error response
     // (and is not settlement data), so exclude it — otherwise a short token like
@@ -273,7 +273,7 @@ describe("GET /settlements/:id/status — access", () => {
 
     expect(res.statusCode).toBe(404);
     const body = res.json();
-    expect(body.error).toBe("NOT_FOUND");
+    expect(body.error.code).toBe("NOT_FOUND");
     expect(body.message).toBe("Settlement not found");
     expect(body.requestId).toBeTruthy();
   });
@@ -285,7 +285,7 @@ describe("GET /settlements/:id/status — access", () => {
     });
 
     expect(res.statusCode).toBe(401);
-    expect(res.json().error).toBe("UNAUTHORIZED");
+    expect(res.json().error.code).toBe("UNAUTHORIZED");
     expect(prisma.settlement.findFirst).not.toHaveBeenCalled();
   });
 
@@ -297,7 +297,7 @@ describe("GET /settlements/:id/status — access", () => {
         headers: authHeader(),
       });
       expect(res.statusCode).toBe(400);
-      expect(res.json().error).toBe("VALIDATION_ERROR");
+      expect(res.json().error.code).toBe("VALIDATION_ERROR");
     }
     expect(prisma.settlement.findFirst).not.toHaveBeenCalled();
   });
@@ -312,7 +312,7 @@ describe("GET /settlements/:id/status — access", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toBe("VALIDATION_ERROR");
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
   });
 });
 

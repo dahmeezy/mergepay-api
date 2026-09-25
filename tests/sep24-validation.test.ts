@@ -170,7 +170,7 @@ describe("POST /anchors/deposit — SEP-24 schema wiring", () => {
       payload: { assetCode: "XLM", account: badKey },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toBe("VALIDATION_ERROR");
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
     expect(anchorService.getToml).not.toHaveBeenCalled();
   });
 
@@ -183,7 +183,7 @@ describe("POST /anchors/deposit — SEP-24 schema wiring", () => {
       payload: { assetCode: "XLM", amount: "1.00000008" },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toBe("VALIDATION_ERROR");
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
     expect(anchorService.getToml).not.toHaveBeenCalled();
   });
 

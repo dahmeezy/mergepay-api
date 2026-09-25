@@ -124,14 +124,14 @@ describe("POST /groups/:id/members/role — validation", () => {
     const res = await changeRole({ userId: TARGET_ID, role: "superuser" });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().code).toBe("VALIDATION_ERROR");
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
   });
 
   it("rejects a missing userId", async () => {
     const res = await changeRole({ role: "admin" });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().code).toBe("VALIDATION_ERROR");
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
   });
 
   it("returns 404 when the target is not a member", async () => {
@@ -172,7 +172,7 @@ describe("POST /groups/:id/members/role — role changes", () => {
     const res = await changeRole({ userId: TARGET_ID, role: "member" });
 
     expect(res.statusCode).toBe(409);
-    expect(res.json().code).toBe("LAST_ADMIN");
+    expect(res.json().error.code).toBe("LAST_ADMIN");
     expect(prisma.groupMember.update).not.toHaveBeenCalled();
     expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
