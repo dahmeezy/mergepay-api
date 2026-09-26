@@ -184,7 +184,7 @@ describe("POST /expenses/:id/settle — idempotency", () => {
     });
 
     expect(res.statusCode).toBe(409);
-    expect(res.json().code).toBe("IDEMPOTENCY_CONFLICT");
+    expect(res.json().error.code).toBe("IDEMPOTENCY_CONFLICT");
     expect(prisma.settlement.create).not.toHaveBeenCalled();
   });
 

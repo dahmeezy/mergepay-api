@@ -95,9 +95,41 @@ describe("sep24InteractiveRequestSchema", () => {
       account: goodKey,
       to: goodKey,
       memo: "TAG",
+      memoType: "text",
       anchorName: "Test Anchor",
     });
     expect(result.success).toBe(true);
+  });
+
+  it("requires memo and memoType to be supplied together (issue #366)", () => {
+    // memo without memoType — an anchor cannot classify it.
+    expect(
+      sep24InteractiveRequestSchema.safeParse({ assetCode: "XLM", memo: "TAG" })
+        .success
+    ).toBe(false);
+    // memoType without memo — nothing to apply it to.
+    expect(
+      sep24InteractiveRequestSchema.safeParse({
+        assetCode: "XLM",
+        memoType: "text",
+      }).success
+    ).toBe(false);
+    // Both together, with a supported memo type, is valid.
+    expect(
+      sep24InteractiveRequestSchema.safeParse({
+        assetCode: "XLM",
+        memo: "TAG",
+        memoType: "text",
+      }).success
+    ).toBe(true);
+    // An unsupported memo type is rejected even with a memo.
+    expect(
+      sep24InteractiveRequestSchema.safeParse({
+        assetCode: "XLM",
+        memo: "TAG",
+        memoType: "binary",
+      }).success
+    ).toBe(false);
   });
 
   it("rejects a malformed Stellar account / destination", () => {
@@ -112,6 +144,14 @@ describe("sep24InteractiveRequestSchema", () => {
     const result = sep24InteractiveRequestSchema.safeParse({
       assetCode: "XLM",
       amount: "0",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects unknown request fields", () => {
+    const result = sep24InteractiveRequestSchema.safeParse({
+      assetCode: "XLM",
+      unexpected: true,
     });
     expect(result.success).toBe(false);
   });
@@ -143,6 +183,15 @@ describe("sep24WithdrawRequestSchema", () => {
     });
     expect(ok.success).toBe(true);
   });
+
+  it("rejects unknown withdrawal fields", () => {
+    const result = sep24WithdrawRequestSchema.safeParse({
+      assetCode: "USDC",
+      amount: "5",
+      unexpected: true,
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("POST /anchors/deposit — SEP-24 schema wiring", () => {
@@ -170,7 +219,7 @@ describe("POST /anchors/deposit — SEP-24 schema wiring", () => {
       payload: { assetCode: "XLM", account: badKey },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toBe("VALIDATION_ERROR");
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
     expect(anchorService.getToml).not.toHaveBeenCalled();
   });
 
@@ -183,7 +232,7 @@ describe("POST /anchors/deposit — SEP-24 schema wiring", () => {
       payload: { assetCode: "XLM", amount: "1.00000008" },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toBe("VALIDATION_ERROR");
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
     expect(anchorService.getToml).not.toHaveBeenCalled();
   });
 

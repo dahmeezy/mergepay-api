@@ -1,4 +1,4 @@
-import Fastify, { FastifyInstance, FastifyRequest } from "fastify";
+import Fastify, { FastifyInstance, FastifyRequest, FastifyServerOptions } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
@@ -31,6 +31,7 @@ import exchangeRateRoutes from "./routes/exchange-rates";
 import userGroupsRoutes from "./routes/user-groups";
 import healthRoutes from "./routes/health";
 import { getCorrelationId } from "./lib/correlation";
+import { formatErrorResponse } from "./utils/error-response";
 import { rateLimitPolicies } from "./lib/rate-limit";
 import { AppError, ErrorCode } from "./lib/errors";
 import { stellarErrorSerializer } from "./lib/stellar-serializer";
@@ -39,6 +40,7 @@ import { PrismaRateLimitStore } from "./services/rate-limit-store";
 import { getReadiness } from "./services/health";
 import { installMultipartGuard } from "./lib/multipart-guard";
 import { nanoid } from "nanoid";
+import { AppError, ErrorCode } from "./lib/errors";
 
 /**
  * Global-policy key. Unlike the per-route policies (which run on `preHandler`
@@ -60,7 +62,20 @@ function globalRateLimitKey(request: FastifyRequest): string {
   return `global:ip:${request.ip}`;
 }
 
-export async function buildApp(): Promise<FastifyInstance> {
+/**
+ * Build-time overrides.
+ *
+ * `logger` exists so tests can inject a Pino instance that writes into an
+ * in-memory stream: under test the default logger is disabled (see the
+ * `config.isTest` branch below), so without an injection point there is
+ * nothing for the error-handling tests to assert against. Production callers
+ * pass no options and keep the configured logger.
+ */
+export interface BuildAppOptions {
+  logger?: FastifyServerOptions["logger"];
+}
+
+export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   validateAssetConfig();
 
   // Contains a @fastify/busboy defect that turns a truncated multipart body
@@ -81,9 +96,11 @@ export async function buildApp(): Promise<FastifyInstance> {
 
       return getCorrelationId(preferred);
     },
-    logger: config.isTest
-      ? false
-      : {
+    logger:
+      options.logger ??
+      (config.isTest
+        ? false
+        : {
           level: config.LOG_LEVEL,
           serializers: {
             err: stellarErrorSerializer as any,
@@ -116,7 +133,7 @@ export async function buildApp(): Promise<FastifyInstance> {
             config.NODE_ENV === "development"
               ? { target: "pino-pretty", options: { colorize: true } }
               : undefined,
-        },
+        }),
     bodyLimit: config.JSON_BODY_LIMIT_BYTES,
   });
 
@@ -148,14 +165,22 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   app.addHook("onError", async (request, _reply, error) => {
-    request.log.error(
-      {
-        correlationId: getCorrelationId(request.id),
-        statusCode: (error as Error & { statusCode?: number }).statusCode ?? 500,
-        errorCode: (error as { code?: string }).code ?? "INTERNAL_ERROR",
-      },
-      "request failed"
-    );
+    const statusCode = (error as any).statusCode ?? (error as any).status ?? 500;
+    const errorCode = (error as any).code ?? "INTERNAL_ERROR";
+    const correlationId = getCorrelationId(request.id);
+
+    const logData: Record<string, unknown> = {
+      correlationId,
+      statusCode,
+      errorCode,
+    };
+    if (statusCode >= 500) {
+      // Include the error object (and its stack) for unexpected server faults.
+      request.log.error({ ...logData, err: error }, "request failed");
+    } else {
+      // Client errors are expected rejections: warn level, no stack.
+      request.log.warn(logData, "request failed");
+    }
   });
 
   // Security headers via @fastify/helmet. CSP is left permissive for a JSON API:
@@ -242,6 +267,15 @@ export async function buildApp(): Promise<FastifyInstance> {
     keyGenerator: globalRateLimitKey,
     addHeaders: { "x-ratelimit-limit": true, "x-ratelimit-remaining": true, "x-ratelimit-reset": true, "retry-after": true } as any,
     errorResponseBuilder: () =>
+      // Must be a real Error (AppError), not a bare payload object:
+      // @fastify/rate-limit *throws* whatever this builder returns, and
+      // Fastify's error pipeline — the central error handler below, which
+      // stamps the requestId and the standard JSON envelope — only engages
+      // for Error instances. A bare object bypassed the handler entirely and
+      // surfaced as a 500 INTERNAL_ERROR with the 429 headers already set,
+      // which is precisely the incoherence this builder exists to avoid.
+      // (The builder's request argument is intentionally unused: the error
+      // handler owns the requestId.)
       new AppError(
         429,
         ErrorCode.RATE_LIMITED,
@@ -321,11 +355,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     const correlationId = getCorrelationId(req.id);
     reply.header("x-request-id", correlationId);
     reply.header("x-correlation-id", correlationId);
-    reply.code(404).send({
-      code: "NOT_FOUND",
-      message: "Route not found",
-      requestId: correlationId,
-    });
+    reply.code(404).send(formatErrorResponse("NOT_FOUND", "Route not found", correlationId));
   });
 
   await app.register(healthRoutes);

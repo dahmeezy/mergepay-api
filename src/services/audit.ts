@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db";
+import { createLogger } from "../lib/logger";
 
 const SENSITIVE_KEYS = new Set([
   "privatekey",
@@ -24,6 +25,35 @@ function sanitize(value: unknown): unknown {
   );
 }
 
+/**
+ * Console/file telemetry for the durable audit trail — Issue #367.
+ *
+ * Every audit row is mirrored as a structured Pino line so operators can
+ * stream treasury security events in real time, while the Prisma record
+ * remains the durable, queryable source of truth. Telemetry is strictly
+ * best-effort: a logging failure must never fail — or roll back — the
+ * operation the audit record documents.
+ */
+const auditLogger = createLogger({ name: "audit", level: "info" });
+
+function emitTelemetry(data: ReturnType<typeof auditData>): void {
+  try {
+    auditLogger.info(
+      {
+        action: data.action,
+        userId: data.userId,
+        groupId: data.groupId,
+        entityType: data.entityType,
+        entityId: data.entityId,
+        metadata: data.metadata,
+      },
+      "audit"
+    );
+  } catch {
+    // Telemetry never breaks the audited operation.
+  }
+}
+
 /** Whether the audited action succeeded, for operator-facing filtering. */
 export type AuditOutcome = "success" | "failure";
 
@@ -43,6 +73,8 @@ export interface AuditParams {
   entityId: string;
   outcome?: AuditOutcome;
   actorType?: AuditActorType;
+  /** Public Stellar key of the actor; private key material is never accepted. */
+  actorPublicKey?: string | null;
   /** Safe, structured detail only — never private keys, bearer tokens, or signed XDRs. */
   metadata?: Record<string, unknown>;
 }
@@ -59,6 +91,7 @@ export function auditData(params: AuditParams) {
       ...(sanitize(params.metadata ?? {}) as Record<string, unknown>),
       ...(params.outcome ? { outcome: params.outcome } : {}),
       ...(params.actorType ? { actorType: params.actorType } : {}),
+      ...(params.actorPublicKey ? { actorPublicKey: params.actorPublicKey } : {}),
     } as any,
   };
 }
@@ -66,9 +99,21 @@ export function auditData(params: AuditParams) {
 /** Best-effort audit log write. Never throws into the request path. */
 export async function audit(params: AuditParams): Promise<void> {
   try {
-    await prisma.auditLog.create({ data: auditData(params) });
-  } catch {
-    // swallow — auditing outside a caller-managed transaction must not break the operation
+    const data = auditData(params);
+    await prisma.auditLog.create({ data });
+    emitTelemetry(data);
+  } catch (err) {
+    // Swallow — auditing outside a caller-managed transaction must not break
+    // the operation — but surface the loss to telemetry so a silently failing
+    // audit store stays visible to operators.
+    try {
+      auditLogger.warn(
+        { err, action: params.action, entityId: params.entityId },
+        "audit write failed"
+      );
+    } catch {
+      // ignore — never throw into the request path
+    }
   }
 }
 
@@ -83,5 +128,10 @@ export async function auditTx(
   tx: Prisma.TransactionClient,
   params: AuditParams
 ): Promise<void> {
-  await tx.auditLog.create({ data: auditData(params) });
+  const data = auditData(params);
+  await tx.auditLog.create({ data });
+  // The row above commits (or rolls back) with the caller's transaction and is
+  // the source of truth; the telemetry line merely mirrors the write for
+  // operators and is best-effort.
+  emitTelemetry(data);
 }

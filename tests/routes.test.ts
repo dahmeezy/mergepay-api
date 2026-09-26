@@ -335,9 +335,9 @@ describe("group routes", () => {
     });
     expect(res.statusCode).toBe(400);
     const body = res.json();
-    expect(body.code).toBe("VALIDATION_ERROR");
+    expect(body.error.code).toBe("VALIDATION_ERROR");
     expect(body.requestId).toBeTruthy();
-    expect(Array.isArray(body.details)).toBe(true);
+    expect(Array.isArray(body.error.details)).toBe(true);
   });
 
   it("GET /groups/:id returns 403 for a non-member", async () => {
@@ -451,7 +451,7 @@ describe("group routes", () => {
       });
 
       expect(res.statusCode).toBe(403);
-      expect(res.json().code).toBe("FORBIDDEN");
+      expect(res.json().error.code).toBe("FORBIDDEN");
     });
 
     it("returns 400 for an invalid public key", async () => {
@@ -492,7 +492,7 @@ describe("group routes", () => {
       });
 
       expect(res.statusCode).toBe(409);
-      expect(res.json().code).toBe("ALREADY_MEMBER");
+      expect(res.json().error.code).toBe("ALREADY_MEMBER");
     });
 
     it("returns 409 when a pending invitation already exists", async () => {
@@ -516,7 +516,7 @@ describe("group routes", () => {
       });
 
       expect(res.statusCode).toBe(409);
-      expect(res.json().code).toBe("INVITATION_PENDING");
+      expect(res.json().error.code).toBe("INVITATION_PENDING");
     });
 
     it("DELETE /groups/:id/members/:memberId removes member and creates audit log", async () => {

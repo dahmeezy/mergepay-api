@@ -306,7 +306,7 @@ describe("route-level provider failure responses", () => {
   it("answers an escaping transport failure with a safe 502 envelope", async () => {
     const res = await app.inject({ method: "GET", url: "/test/provider-transport" });
     expect(res.statusCode).toBe(502);
-    expect(res.json().code).toBe("UPSTREAM_ERROR");
+    expect(res.json().error.code).toBe("UPSTREAM_ERROR");
   });
 
   it("distinguishes a provider rejection by its machine-readable code", async () => {
@@ -315,7 +315,7 @@ describe("route-level provider failure responses", () => {
     const body = res.json();
     expect(body.code).toBe("PROVIDER_REJECTED");
     expect(body.message).toBe("Stellar rejected the transaction: tx_bad_seq");
-    expect(body.error).toBe("PROVIDER_REJECTED");
+    expect(body.error.code).toBe("PROVIDER_REJECTED");
   });
 
   it("keeps unexpected errors on the generic internal-error path", async () => {
