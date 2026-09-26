@@ -85,11 +85,16 @@ beforeEach(async () => {
 function expectStandardRateLimitBody(res: { json: () => any; headers: Record<string, unknown> }) {
   const body = res.json();
   expect(body.code).toBe("RATE_LIMITED");
-  expect(body.error).toBe("RATE_LIMITED");
+  // Canonical envelope (src/utils/error-response.ts): the `error` field is the
+  // nested payload object, and the flat code/message/requestId fields are the
+  // backwards-compatible mirror the central error handler also emits.
+  expect(body.error).toMatchObject({ code: "RATE_LIMITED", message: body.message });
   expect(typeof body.message).toBe("string");
   expect(body.message.length).toBeGreaterThan(0);
   expect(typeof body.requestId).toBe("string");
   expect(body.requestId.length).toBeGreaterThan(0);
+  expect(body.error).not.toHaveProperty("statusCode");
+  expect(body.error).not.toHaveProperty("stack");
   // The 429 is a client error, never a sanitized crash: no leak fields.
   expect(body).not.toHaveProperty("statusCode");
   expect(body).not.toHaveProperty("stack");
